@@ -80,7 +80,7 @@ func TestCombination() {
 	select a,b from t3 where a > c order by b
 	select distinct a,b from t1
 	select a,b from t1 limit 10 offset 8
-	select a,count(b) from t4 where b > 100 group by a  -- 这里 count 不支持 *
+	select a,count(b) from t4 where b > 100 group by a  -- 这里 count 不支持 * 必须使用字段
 	select t1.name,t2.age from t1 join t2 on t1.name = t2.name
 
 	update t2 set n = 22,a = 33 where a > 100 AND b = 100
