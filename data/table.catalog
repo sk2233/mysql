@@ -1,0 +1,1 @@
+[{"Name":"users","Columns":[{"Name":"users.id","Type":1,"Len":8},{"Name":"users.height","Type":2,"Len":8},{"Name":"users.name","Type":3,"Len":32},{"Name":"users.extra","Type":4,"Len":8}]}]
