@@ -70,7 +70,9 @@ func main() {
 
 func TestCombination() {
 	LoadCatalog()
+	defer SaveCatalog()
 	storage := NewStorage()
+	defer storage.Close()
 
 	/*  暂时不支持起别名
 	select a,b from t1
@@ -97,6 +99,7 @@ func TestCombination() {
 
 	fmt.Println(operator.GetColumns())
 	operator.Open()
+	defer operator.Close()
 	for {
 		res := operator.Next()
 		if res == nil {
@@ -104,10 +107,6 @@ func TestCombination() {
 		}
 		fmt.Println(res)
 	}
-	operator.Close()
-
-	storage.Close()
-	SaveCatalog()
 }
 
 func TestOperator() {
