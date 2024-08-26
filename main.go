@@ -72,27 +72,27 @@ func TestCombination() {
 	LoadCatalog()
 	storage := NewStorage()
 
-	/*
-		select a,b from t1
-		select * from t2 where a > b AND b > 5
-		select a,b from t3 where a > c order by b
-		select distinct a,b from t1
-		select a,b from t1 limit 10 offset 8
-		select a,count(b) from t4 where b > 100 group by a  -- 这里 count 不支持 *
-		select t1.name,t2.age from t1 join t2 on t1.name = t2.name
+	/*  暂时不支持起别名
+	select a,b from t1
+	select * from t2 where a > b AND b > 5
+	select a,b from t3 where a > c order by b
+	select distinct a,b from t1
+	select a,b from t1 limit 10 offset 8
+	select a,count(b) from t4 where b > 100 group by a  -- 这里 count 不支持 *
+	select t1.name,t2.age from t1 join t2 on t1.name = t2.name
 
-		update t2 set n = 22,a = 33 where a > 100 AND b = 100
-		insert into t3 values(2,3,2,4),(1,2,3,4)  -- 必须填写全字段，不支持默认值
-		delete from t3 where a = 100
+	update t2 set n = 22,a = 33 where a > 100 AND b = 100
+	insert into t3 values(2,3,2,4),(1,2,3,4)  -- 必须填写全字段，不支持默认值
+	delete from t3 where a = 100
 
-		CREATE TABLE t2(uid int,height float,name varchar(32),extra text)
-		CREATE INDEX idx ON t2(a,b)
+	CREATE TABLE t2(uid int,height float,name varchar(32),extra text)
+	CREATE INDEX idx ON t2(a,b)
 	*/
 	scanner := NewScanner("CREATE INDEX idx ON t2(a,b)")
 	tokens := scanner.ScanTokens()
 	parser := NewParser(tokens)
 	node := parser.ParseTokens()
-	transformer := NewTransformer(node)
+	transformer := NewTransformer(node, storage)
 	operator := transformer.Transform()
 
 	fmt.Println(operator.GetColumns())

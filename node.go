@@ -4,6 +4,8 @@
 */
 package main
 
+// 所有 Column 字段不直接使用 string 使用 IDNode 主要方便后续使用
+
 type INode interface {
 }
 
@@ -30,7 +32,7 @@ type ExprNode struct { // 只支持一些简单的 二元条件
 }
 
 type OrderNode struct {
-	Field string
+	Field *IDNode
 	Desc  bool
 }
 
@@ -46,17 +48,17 @@ type JoinNode struct {
 
 type SelectNode struct {
 	Fields   []INode   // 可以是 IDNode  StarNode  FuncNode  ImmNode
-	Distinct []string  // 只支持字段名称
+	Distinct []*IDNode // 只支持字段名称
 	From     string    // 仅支持表名
 	Join     *JoinNode // 关联查询
 	Where    *ExprNode // 条件
-	Groups   []string  // 仅支持字段名称 相关聚合函数在字段中
+	Groups   []*IDNode // 仅支持字段名称 相关聚合函数在字段中
 	Orders   []*OrderNode
 	Limit    *LimitNode
 }
 
 type SetNode struct {
-	Field string
+	Field *IDNode
 	Value INode // 可以是 IDNode ImmNode FuncNode
 }
 
@@ -77,7 +79,7 @@ type DeleteNode struct {
 }
 
 type ColumnNode struct {
-	Name string
+	Name *IDNode
 	Type string
 	Len  int64
 }
@@ -90,5 +92,5 @@ type CreateTableNode struct { // 创建表结构节点
 type CreateIndexNode struct { // 创建索引节点
 	Index   string
 	Table   string
-	Columns []string
+	Columns []*IDNode
 }

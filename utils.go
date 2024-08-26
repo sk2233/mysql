@@ -94,20 +94,16 @@ func PickColumn(selectColumns []string, columns []*Column) []*Column {
 	return columnRes
 }
 
-func PickColumnAndData(selectColumns []string, columns []*Column, data []any) ([]*Column, []any) {
-	columnMap := make(map[string]*Column)
+func PickData(selectColumns []string, columns []*Column, data []any) []any {
 	dataMap := make(map[string]any)
 	for i, column := range columns {
-		columnMap[column.Name] = column
 		dataMap[column.Name] = data[i]
 	}
-	columnRes := make([]*Column, 0)
 	dataRes := make([]any, 0)
 	for _, column := range selectColumns {
-		columnRes = append(columnRes, columnMap[column])
 		dataRes = append(dataRes, dataMap[column])
 	}
-	return columnRes, dataRes
+	return dataRes
 }
 
 func GetColumnSize(columns []*Column) int {
@@ -253,11 +249,26 @@ func (v *Value) ToStr() string {
 	return v.Data.(string)
 }
 
-func (v *Value) GetBool() bool { // bool值暂时不接受字面量
+func (v *Value) ToBool() bool { // bool值暂时不接受字面量
 	if v.Type != TypBool {
 		panic(fmt.Sprintf("type %v not bool", v.Type))
 	}
 	return v.Data.(bool)
+}
+
+func ValueToAny(value *Value, typ int8) any {
+	switch typ {
+	case TypInt:
+		return value.ToInt()
+	case TypFloat:
+		return value.ToFloat()
+	case TypStr, TypTxt:
+		return value.ToStr()
+	case TypBool:
+		return value.ToBool()
+	default:
+		panic(fmt.Sprintf("unknown column type: %v", typ))
+	}
 }
 
 func ParseValue(node INode, columns []*Column, data []any) *Value {
@@ -339,10 +350,36 @@ func CalculateExpr(expr *ExprNode, columns []*Column, data []any) bool {
 	case LE:
 		return CompareValue(left, right) <= 0
 	case AND:
-		return left.GetBool() && right.GetBool()
+		return left.ToBool() && right.ToBool()
 	case OR:
-		return left.GetBool() || right.GetBool()
+		return left.ToBool() || right.ToBool()
 	default:
 		panic(fmt.Sprintf("unsupport operator: %v", expr.Operator))
 	}
+}
+
+func DistinctSlice[T comparable](val []T) []T {
+	res := make([]T, 0)
+	set := make(map[T]struct{})
+	for _, item := range val {
+		if _, ok := set[item]; !ok {
+			set[item] = struct{}{}
+			res = append(res, item)
+		}
+	}
+	return res
+}
+
+func SubSlice[T comparable](val1 []T, val2 []T) []T {
+	set := make(map[T]struct{})
+	for _, item := range val2 {
+		set[item] = struct{}{}
+	}
+	res := make([]T, 0)
+	for _, item := range val1 {
+		if _, ok := set[item]; !ok {
+			res = append(res, item)
+		}
+	}
+	return res
 }

@@ -47,6 +47,43 @@ func NewInputOperator(input IOperator) *InputOperator {
 	return &InputOperator{Input: input}
 }
 
+type OnceOperator struct {
+	Columns []*Column
+	Used    bool
+	Action  func() int64 // 子类必须赋值
+}
+
+func NewOnceOperator(action func() int64) *OnceOperator {
+	return &OnceOperator{Action: action}
+}
+
+func (o *OnceOperator) Open() {
+	o.Columns = []*Column{{
+		Name: "effected_row",
+		Type: TypInt,
+		Len:  8,
+	}}
+}
+
+func (o *OnceOperator) Close() {
+}
+
+func (o *OnceOperator) Next() []any {
+	if o.Used {
+		return nil
+	}
+	o.Used = true
+	return []any{o.Action()}
+}
+
+func (o *OnceOperator) Reset() {
+	panic("not support reset")
+}
+
+func (o *OnceOperator) GetColumns() []*Column {
+	return o.Columns
+}
+
 //======================TableScanOperator=========================
 
 // 只做简单的全表扫描，不包含条件下推
@@ -84,7 +121,7 @@ func (t *TableScanOperator) Next() []any {
 	return append(res, currOffset) // 最后一个就是 offset
 }
 
-func NewTableScanOperator(storage *Storage, table string) *TableScanOperator {
+func NewTableScanOperator(storage *Storage, table string) IOperator {
 	return &TableScanOperator{Storage: storage, Table: table, Offset: 0}
 }
 
@@ -127,7 +164,7 @@ func (i *IndexScanOperator) Next() []any {
 	return res
 }
 
-func NewIndexScanOperator(storage *Storage, index string) *IndexScanOperator {
+func NewIndexScanOperator(storage *Storage, index string) IOperator {
 	return &IndexScanOperator{Storage: storage, Index: index, Node: nil, NodeIdx: 0}
 }
 
@@ -181,7 +218,7 @@ func (j *JoinOperator) Next() []any {
 	}
 }
 
-func NewJoinOperator(left IOperator, right IOperator, expr *ExprNode) *JoinOperator {
+func NewJoinOperator(left IOperator, right IOperator, expr *ExprNode) IOperator {
 	return &JoinOperator{Left: left, Right: right, Expr: expr}
 }
 
@@ -229,7 +266,7 @@ func (p *ProjectionOperator) Next() []any {
 	return res
 }
 
-func NewProjectionOperator(input IOperator, selectFields []string) *ProjectionOperator {
+func NewProjectionOperator(input IOperator, selectFields []string) IOperator {
 	return &ProjectionOperator{InputOperator: NewInputOperator(input), SelectFields: selectFields}
 }
 
@@ -291,7 +328,7 @@ func (d *DistinctOperator) Next() []any {
 	}
 }
 
-func NewDistinctOperator(input IOperator, distinctFields []string) *DistinctOperator {
+func NewDistinctOperator(input IOperator, distinctFields []string) IOperator {
 	return &DistinctOperator{InputOperator: NewInputOperator(input), DistinctFields: distinctFields, Set: make(map[string]struct{})}
 }
 
@@ -314,7 +351,7 @@ func (f *FilterOperator) Next() []any {
 	}
 }
 
-func NewFilterOperator(input IOperator, expr *ExprNode) *FilterOperator {
+func NewFilterOperator(input IOperator, expr *ExprNode) IOperator {
 	return &FilterOperator{InputOperator: NewInputOperator(input), Expr: expr}
 }
 
@@ -436,7 +473,7 @@ func (g *GroupOperator) Next() []any {
 	}
 }
 
-func NewGroupOperator(input IOperator, groupColumns []string, funcs []*FuncNode) *GroupOperator {
+func NewGroupOperator(input IOperator, groupColumns []string, funcs []*FuncNode) IOperator {
 	return &GroupOperator{InputOperator: NewInputOperator(input), GroupColumns: groupColumns, Funcs: funcs}
 }
 
@@ -472,11 +509,11 @@ func (s *SortOperator) Open() {
 	dataIdx := make([]int, 0)
 	dataColumns := make([]*Column, 0)
 	for _, order := range s.Orders {
-		if idx, ok := idxMap[order.Field]; ok {
+		if idx, ok := idxMap[order.Field.Value]; ok {
 			dataIdx = append(dataIdx, idx)
-			dataColumns = append(dataColumns, columnMap[order.Field])
+			dataColumns = append(dataColumns, columnMap[order.Field.Value])
 		} else {
-			panic(fmt.Sprintf("field %s not found", order.Field))
+			panic(fmt.Sprintf("field %s not found", order.Field.Value))
 		}
 	}
 	sort.Slice(s.Data, func(i, j int) bool {
@@ -517,7 +554,7 @@ func (s *SortOperator) Next() []any {
 	}
 }
 
-func NewSortOperator(input IOperator, orders []*OrderNode) *SortOperator {
+func NewSortOperator(input IOperator, orders []*OrderNode) IOperator {
 	return &SortOperator{InputOperator: NewInputOperator(input), Orders: orders}
 }
 
@@ -558,52 +595,30 @@ func (l *LimitOperator) Reset() {
 	l.Count = 0
 }
 
-func NewLimitOperator(input IOperator, limit int, offset int) *LimitOperator {
+func NewLimitOperator(input IOperator, limit int, offset int) IOperator {
 	return &LimitOperator{Limit: limit, Offset: offset, InputOperator: NewInputOperator(input), Count: 0}
 }
 
 //=====================InsertOperator====================
 
 type InsertOperator struct {
+	*OnceOperator
 	Table   string
 	Data    [][]any // 可以设置多条数据  若需要支持 select insert 这里也需要使用 IOperator 作为输入
 	Storage *Storage
-	Columns []*Column
-	Used    bool
 }
 
-func (i *InsertOperator) Next() []any {
-	if i.Used {
-		return nil
-	}
-	i.Used = true
+func (i *InsertOperator) InsertData() int64 {
 	for _, data := range i.Data {
 		i.Storage.InsertData(i.Table, data)
 	}
-	return []any{int64(len(i.Data))}
+	return int64(len(i.Data))
 }
 
-func (i *InsertOperator) Reset() {
-	panic("not support reset")
-}
-
-func (i *InsertOperator) GetColumns() []*Column {
-	return i.Columns
-}
-
-func (i *InsertOperator) Open() {
-	i.Columns = []*Column{{
-		Name: "effected_row",
-		Type: TypInt,
-		Len:  8,
-	}}
-}
-
-func (i *InsertOperator) Close() {
-}
-
-func NewInsertOperator(storage *Storage, table string, data [][]any) *InsertOperator {
-	return &InsertOperator{Table: table, Data: data, Storage: storage, Used: false}
+func NewInsertOperator(storage *Storage, table string, data [][]any) IOperator {
+	res := &InsertOperator{Table: table, Data: data, Storage: storage}
+	res.OnceOperator = NewOnceOperator(res.InsertData)
+	return res
 }
 
 //======================UpdateOperator=============================
@@ -632,11 +647,11 @@ func (u *UpdateOperator) Next() []any {
 	setIdx := make([]int, 0)
 	setColumns := make([]*Column, 0)
 	for _, set := range u.Sets {
-		if idx, ok := idxMap[set.Field]; ok {
+		if idx, ok := idxMap[set.Field.Value]; ok {
 			setIdx = append(setIdx, idx)
-			setColumns = append(setColumns, columnMap[set.Field])
+			setColumns = append(setColumns, columnMap[set.Field.Value])
 		} else {
-			panic(fmt.Sprintf("field %s not found", set.Field))
+			panic(fmt.Sprintf("field %s not found", set.Field.Value))
 		}
 	}
 	effectedRow := int64(0)
@@ -648,16 +663,7 @@ func (u *UpdateOperator) Next() []any {
 		for i, set := range u.Sets { // 尽量 set 值不要依赖其他有本次修改的值，可能出现不可控情况
 			column := setColumns[i]
 			val := ParseValue(set.Value, columns, res)
-			switch column.Type {
-			case TypInt:
-				res[setIdx[i]] = val.ToInt()
-			case TypFloat:
-				res[setIdx[i]] = val.ToFloat()
-			case TypStr, TypTxt:
-				res[setIdx[i]] = val.ToStr()
-			default:
-				panic(fmt.Sprintf("unknown column type %v", column.Type))
-			}
+			res[setIdx[i]] = ValueToAny(val, column.Type)
 		}
 		offsetIdx := len(res) - 1
 		offset := res[offsetIdx].(int64) // 最后一个就是 offset
@@ -684,7 +690,7 @@ func (u *UpdateOperator) Open() {
 	}}
 }
 
-func NewUpdateOperator(input IOperator, storage *Storage, table string, sets []*SetNode) *UpdateOperator {
+func NewUpdateOperator(input IOperator, storage *Storage, table string, sets []*SetNode) IOperator {
 	return &UpdateOperator{InputOperator: NewInputOperator(input), Table: table, Storage: storage, Sets: sets, Used: false}
 }
 
@@ -737,18 +743,72 @@ func (d *DeleteOperator) Close() {
 	d.InputOperator.Close()
 }
 
-func NewDeleteOperator(input IOperator, storage *Storage, table string) *DeleteOperator {
+func NewDeleteOperator(input IOperator, storage *Storage, table string) IOperator {
 	return &DeleteOperator{InputOperator: NewInputOperator(input), Storage: storage, Table: table, Used: false}
 }
 
 //====================CreateTableOperator=======================
 
 type CreateTableOperator struct { // 暂时不支持表结构的修改
+	*OnceOperator
+	Table   string
+	Columns []*Column
+}
 
+func (c *CreateTableOperator) CreateTable() int64 {
+	table := &Table{
+		Name:    c.Table,
+		Columns: c.Columns,
+	}
+	AddTable(table)
+	return 1
+}
+
+func NewCreateTableOperator(table string, columns []*Column) IOperator {
+	res := &CreateTableOperator{Table: table, Columns: columns}
+	res.OnceOperator = NewOnceOperator(res.CreateTable)
+	return res
 }
 
 //========================CreateIndexOperator=========================
 
 type CreateIndexOperator struct { // 暂时不支持索引结构的修改
+	*OnceOperator
+	Storage *Storage
+	Index   string
+	Table   string
+	Columns []string
+}
 
+func (c *CreateIndexOperator) CreateIndex() int64 {
+	// 添加索引
+	index := &Index{
+		Name:      c.Index,
+		TableName: c.Table,
+		Columns:   c.Columns,
+	}
+	AddIndex(index)
+	// 为存量数据创建索引
+	operator := NewTableScanOperator(c.Storage, c.Table)
+	operator.Open()
+	effectedRow := int64(0)
+	btree := c.Storage.OpenIndex(index.Name)
+	for {
+		res := operator.Next()
+		if res == nil {
+			break
+		}
+		data0 := PickData(index.Columns, operator.GetColumns(), res)
+		offset := res[len(res)-1].(int64)
+		btree.AddData(data0, offset)
+		effectedRow++
+	}
+	operator.Close()
+	return effectedRow
+}
+
+func NewCreateIndexOperator(storage *Storage, index string, table string, columns []string) IOperator {
+	res := &CreateIndexOperator{Index: index, Table: table, Columns: columns, Storage: storage}
+	res.OnceOperator = NewOnceOperator(res.CreateIndex)
+	return res
 }

@@ -100,6 +100,15 @@ func GetTable(table string) *Table {
 	panic("table not found: " + table)
 }
 
+func AddTable(table *Table) {
+	for _, item := range tables {
+		if item.Name == table.Name {
+			panic(fmt.Sprintf("table %s already exists", table.Name))
+		}
+	}
+	tables = append(tables, table)
+}
+
 func GetIndex(index string) *Index {
 	for _, item := range indexes {
 		if item.Name == index {
@@ -107,6 +116,15 @@ func GetIndex(index string) *Index {
 		}
 	}
 	panic("index not found: " + index)
+}
+
+func AddIndex(index *Index) {
+	for _, item := range indexes {
+		if item.Name == index.Name {
+			panic(fmt.Sprintf("index %s already exists", index.Name))
+		}
+	}
+	indexes = append(indexes, index)
 }
 
 func ListIndexes(table string) []*Index {

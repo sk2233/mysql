@@ -520,7 +520,7 @@ func (s *Storage) InsertData(table string, data []any) {
 	// 写入索引
 	indexes0 := ListIndexes(table)
 	for _, index := range indexes0 {
-		_, data0 := PickColumnAndData(index.Columns, meta.Columns, data)
+		data0 := PickData(index.Columns, meta.Columns, data)
 		btree := s.OpenIndex(index.Name)
 		btree.AddData(data0, offset)
 	}
@@ -533,7 +533,7 @@ func (s *Storage) DeleteData(table string, offset int64) {
 	meta := GetTable(table)
 	indexes0 := ListIndexes(table)
 	for _, index := range indexes0 {
-		_, data0 := PickColumnAndData(index.Columns, meta.Columns, data)
+		data0 := PickData(index.Columns, meta.Columns, data)
 		btree := s.OpenIndex(index.Name)
 		btree.DelData(data0)
 	}

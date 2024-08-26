@@ -55,7 +55,7 @@ func (p *Parser) ParseTokens() INode {
 func (p *Parser) parseColumn() *ColumnNode {
 	res := &ColumnNode{}
 	name := p.MustRead(ID)
-	res.Name = name.Value
+	res.Name = &IDNode{Value: name.Value}
 	typ := p.MustRead(INT, FLOAT, VARCHAR, TEXT)
 	res.Type = strings.ToUpper(typ.Value)
 	if p.Match(LPAREN) {
@@ -96,10 +96,10 @@ func (p *Parser) parseCreateIndex() INode {
 	// column
 	p.MustRead(LPAREN)
 	column := p.MustRead(ID)
-	res.Columns = append(res.Columns, column.Value)
+	res.Columns = append(res.Columns, &IDNode{Value: column.Value})
 	for p.Match(COMMA) {
 		column = p.MustRead(ID)
-		res.Columns = append(res.Columns, column.Value)
+		res.Columns = append(res.Columns, &IDNode{Value: column.Value})
 	}
 	p.MustRead(RPAREN)
 	return res
@@ -179,7 +179,7 @@ func (p *Parser) parseSet() *SetNode {
 	token := p.Read()
 	if token.Type == INT || token.Type == FLOAT || token.Type == STR {
 		return &SetNode{
-			Field: field.Value,
+			Field: &IDNode{Value: field.Value},
 			Value: &ImmNode{Value: token.Value},
 		}
 	}
@@ -188,12 +188,12 @@ func (p *Parser) parseSet() *SetNode {
 	}
 	if p.Match(LPAREN) {
 		return &SetNode{
-			Field: field.Value,
+			Field: &IDNode{Value: field.Value},
 			Value: p.parseFunc(token),
 		}
 	}
 	return &SetNode{
-		Field: field.Value,
+		Field: &IDNode{field.Value},
 		Value: &IDNode{Value: token.Value},
 	}
 }
@@ -203,15 +203,13 @@ func (p *Parser) parseSelect() INode {
 	// select
 	if p.Match(DISTINCT) { // 有 DISTINCT 的话，select 就直接使用 DISTINCT 的列
 		field := p.MustRead(ID)
-		res.Distinct = append(res.Distinct, field.Value)
+		res.Distinct = append(res.Distinct, &IDNode{Value: field.Value})
 		for p.Match(COMMA) {
 			field = p.MustRead(ID)
-			res.Distinct = append(res.Distinct, field.Value)
+			res.Distinct = append(res.Distinct, &IDNode{Value: field.Value})
 		}
 		for _, item := range res.Distinct {
-			res.Fields = append(res.Fields, &IDNode{
-				Value: item,
-			})
+			res.Fields = append(res.Fields, item)
 		}
 	} else {
 		res.Fields = append(res.Fields, p.parseField())
@@ -240,10 +238,10 @@ func (p *Parser) parseSelect() INode {
 	if p.Match(GROUP) {
 		p.MustRead(BY)
 		group := p.MustRead(ID)
-		res.Groups = append(res.Groups, group.Value)
+		res.Groups = append(res.Groups, &IDNode{Value: group.Value})
 		for p.Match(COMMA) {
 			group = p.MustRead(ID)
-			res.Groups = append(res.Groups, group.Value)
+			res.Groups = append(res.Groups, &IDNode{Value: group.Value})
 		}
 	}
 	// order by
@@ -282,7 +280,7 @@ func (p *Parser) parseOrder() *OrderNode {
 		desc = true
 	}
 	return &OrderNode{
-		Field: field.Value,
+		Field: &IDNode{Value: field.Value},
 		Desc:  desc,
 	}
 }
