@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 )
 
 // 元数据依旧是一张表，不过其元数据是写死的，且其数据会在系统启动时加载进内存 先直接使用 json 实现
@@ -36,18 +37,22 @@ type Index struct {
 
 // 函数元数据还需要定义输入与输出
 type Func struct { // 函数定义
-	Name    string
-	RetType func(columns ...*Column) (int8, int64) //Column 只关心 Type Len 根据输入类型获取输出类型与输出长度
-	Call    func(params []*Value) any              // 计算最终值
+	Name             string
+	IsAggregate      bool                               // 是否为聚合函数
+	RetType          func(typs ...int8) (int8, int64)   // 非聚合函数，类型需要与params对齐
+	AggregateRetType func(column *Column) (int8, int64) // 对于聚合函数只有一列输入
+	Call             func(params []*Value) any          // 计算最终值
 }
 
 var (
 	tables  = make([]*Table, 0)
 	indexes = make([]*Index, 0)
-	funcs   = []*Func{{ // 函数是内置的不需要序列化
-		Name: "max",
-		RetType: func(columns ...*Column) (int8, int64) {
-			return columns[0].Type, columns[0].Len
+	// 待实现的聚合函数 count sum avg max min
+	funcs = []*Func{{ // 函数是内置的不需要序列化
+		Name:        "MAX",
+		IsAggregate: true,
+		AggregateRetType: func(column *Column) (int8, int64) {
+			return column.Type, column.Len
 		},
 		Call: func(params []*Value) any { // 不会为 0 个
 			for i := 1; i < len(params); i++ {
@@ -56,6 +61,15 @@ var (
 				}
 			}
 			return params[0].Data
+		},
+	}, {
+		Name:        "COUNT",
+		IsAggregate: true,
+		AggregateRetType: func(column *Column) (int8, int64) {
+			return TypInt, 8
+		},
+		Call: func(params []*Value) any {
+			return int64(len(params))
 		},
 	}}
 )
@@ -83,6 +97,7 @@ func SaveCatalog() {
 }
 
 func GetFunc(name string) *Func {
+	name = strings.ToUpper(name)
 	for _, func0 := range funcs {
 		if func0.Name == name {
 			return func0

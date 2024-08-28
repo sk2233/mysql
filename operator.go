@@ -118,6 +118,9 @@ func (t *TableScanOperator) Next() []any {
 	var res []any
 	var currOffset int64
 	res, currOffset, t.Offset = t.Storage.NextData(t.Table, t.Offset)
+	if res == nil {
+		return nil
+	}
 	return append(res, currOffset) // 最后一个就是 offset
 }
 
@@ -175,7 +178,7 @@ type JoinOperator struct { // 只支持 内连接 (笛卡尔积就是没有条�
 	Left, Right IOperator // 只支持两个
 	LeftData    []any
 	Columns     []*Column
-	Expr        *ExprNode // 连接条件
+	Expr        *ExprNode // 连接条件 可以为空，就是没有链接条件
 }
 
 func (j *JoinOperator) GetColumns() []*Column {
@@ -212,7 +215,7 @@ func (j *JoinOperator) Next() []any {
 			continue
 		}
 		res := append(j.LeftData, rightData...)
-		if CalculateExpr(j.Expr, j.Columns, res) {
+		if j.Expr == nil || CalculateExpr(j.Expr, j.Columns, res) {
 			return res
 		}
 	}
@@ -362,7 +365,8 @@ func NewFilterOperator(input IOperator, expr *ExprNode) IOperator {
 type GroupOperator struct { // 支持多列分组
 	*InputOperator
 	GroupColumns []string // 聚合的列  不能简单使用列名称，多表可能存在重复列名 可以统一规划为 表名.列名 长度可以为空
-	// SUM AVG MAX MIN COUNT 有 count 且不是聚合查询的语句需要进行改写为聚合语句 GroupColumns 可以为空
+	// SUM AVG MAX MIN COUNT 有 count 且不是聚合查询的语句需要进行改写为聚合语句 GroupColumns 可以为空 []string
+	// 这里是所有相关的函数，没有区分是否是聚合函数
 	Funcs []*FuncNode // 聚合函数操作的其他列 例如 max(height)  group by age 聚合函数只能有一个入参且必须为 IDNode
 	// 需要全放到内存 暂时不考虑落盘方案
 	Data    [][]any
@@ -383,8 +387,15 @@ func (g *GroupOperator) GetFuncIDNode(func0 *FuncNode) *IDNode {
 
 func (g *GroupOperator) Open() {
 	g.InputOperator.Open()
-	dataIdx := make([]int, 0)
-	funcIdx := make([]int, 0)
+	keyIdx := make([]int, 0)          // 聚合 key 的数据下标
+	paramIdx := make([]int, 0)        // 聚合函数对应输入的下标
+	funcNodes := make([]*FuncNode, 0) // 聚合函数节点
+	for _, item := range g.Funcs {
+		func0 := GetFunc(item.FuncName)
+		if func0.IsAggregate {
+			funcNodes = append(funcNodes, item)
+		}
+	}
 	// 先组装列信息
 	columns := g.Input.GetColumns()
 	columnMap := make(map[string]*Column)
@@ -396,22 +407,22 @@ func (g *GroupOperator) Open() {
 	for _, field := range g.GroupColumns {
 		if column, ok := columnMap[field]; ok {
 			g.Columns = append(g.Columns, column)
-			dataIdx = append(dataIdx, idxMap[field])
+			keyIdx = append(keyIdx, idxMap[field])
 		} else {
 			panic(fmt.Sprintf("column %s not found", field))
 		}
 	}
-	for _, item := range g.Funcs {
-		node := g.GetFuncIDNode(item)
+	for _, funcNode := range funcNodes {
+		node := g.GetFuncIDNode(funcNode)
 		if column, ok := columnMap[node.Value]; ok {
-			func0 := GetFunc(item.FuncName)
-			typ, l := func0.RetType(column) // 获取对应类型与长度
+			func0 := GetFunc(funcNode.FuncName)
+			typ, l := func0.AggregateRetType(column) // 获取对应类型与长度
 			g.Columns = append(g.Columns, &Column{
-				Name: fmt.Sprintf("%v#%v", node.Value, item.FuncName), // 列名需要拼接函数名
+				Name: GetFuncColumnName(funcNode), // 列名需要拼接函数名
 				Type: typ,
 				Len:  l,
 			})
-			funcIdx = append(funcIdx, idxMap[node.Value])
+			paramIdx = append(paramIdx, idxMap[node.Value])
 		} else {
 			panic(fmt.Sprintf("column %s not found", node.Value))
 		}
@@ -423,22 +434,22 @@ func (g *GroupOperator) Open() {
 		if res == nil {
 			break
 		}
-		key := g.GenKey(res, dataIdx)
+		key := g.GenKey(res, keyIdx)
 		temp[key] = append(temp[key], res)
 	}
 	for _, items := range temp {
 		res := make([]any, 0) // 组装分组数据
-		for _, idx := range dataIdx {
+		for _, idx := range keyIdx {
 			res = append(res, items[0][idx]) // 分组字段都是一样的随便选一个就行 这里直接用第一个的
 		} // 组装函数数据
-		for i, item := range g.Funcs {
-			func0 := GetFunc(item.FuncName)
+		for i, funcNode := range funcNodes {
+			func0 := GetFunc(funcNode.FuncName)
 			params := make([]*Value, 0)
-			column := columns[funcIdx[i]]
+			column := columns[paramIdx[i]]
 			for _, data := range items {
 				params = append(params, &Value{
 					Type: column.Type,
-					Data: data[funcIdx[i]],
+					Data: data[paramIdx[i]],
 				})
 			}
 			res = append(res, func0.Call(params))
@@ -597,6 +608,129 @@ func (l *LimitOperator) Reset() {
 
 func NewLimitOperator(input IOperator, limit int, offset int) IOperator {
 	return &LimitOperator{Limit: limit, Offset: offset, InputOperator: NewInputOperator(input), Count: 0}
+}
+
+//======================FuncExecOperator===========================
+
+type Param struct {
+	DataIdx int    // 动态列参数
+	Value   *Value // Imm 参数
+}
+
+type FuncExecOperator struct {
+	*InputOperator
+	Funcs   []*FuncNode // 这里只处理普通函数不处理聚合函数
+	Columns []*Column
+	Params  [][]*Param // 每个函数对应的参数
+}
+
+func (f *FuncExecOperator) GetColumns() []*Column {
+	return f.Columns
+}
+
+func (f *FuncExecOperator) Open() {
+	f.Input.Open()
+	columns := f.Input.GetColumns()
+	idxMap := make(map[string]int)
+	columnMap := make(map[string]*Column)
+	for idx, column := range columns {
+		idxMap[column.Name] = idx
+		columnMap[column.Name] = column
+	}
+	funcNodes := make([]*FuncNode, 0)
+	for _, funcNode := range f.Funcs {
+		func0 := GetFunc(funcNode.FuncName)
+		if func0.IsAggregate { // 只处理非聚合函数
+			continue
+		}
+		funcNodes = append(funcNodes, funcNode)
+		params := make([]*Param, 0)
+		typs := make([]int8, 0)
+		for _, param := range funcNode.Params {
+			if idNode, ok1 := param.(*IDNode); ok1 {
+				params = append(params, &Param{
+					DataIdx: idxMap[idNode.Value],
+				})
+				typs = append(typs, columnMap[idNode.Value].Type)
+			} else if immNode, ok2 := param.(*ImmNode); ok2 {
+				typ := TokenTypeToType(immNode.Type)
+				params = append(params, &Param{
+					Value: &Value{
+						Type:  typ,
+						Value: immNode.Value,
+					},
+				})
+				typs = append(typs, typ)
+			} else {
+				panic(fmt.Sprintf("invalid param = %v", param))
+			}
+		}
+		typ, l := func0.RetType(typs...)
+		columns = append(columns, &Column{
+			Name: GetFuncColumnName(funcNode),
+			Type: typ,
+			Len:  l,
+		})
+		f.Params = append(f.Params, params)
+	}
+	f.Funcs = funcNodes
+	f.Columns = columns
+}
+
+func (f *FuncExecOperator) Next() []any {
+	res := f.Input.Next()
+	if res == nil {
+		return nil
+	}
+	for i, funcNode := range f.Funcs {
+		func0 := GetFunc(funcNode.FuncName)
+		params := make([]*Value, 0)
+		for _, param := range f.Params[i] {
+			if param.Value != nil {
+				params = append(params, param.Value)
+			} else {
+				params = append(params, &Value{
+					Type: f.Columns[param.DataIdx].Type, // 会增加列可以直接使用列
+					Data: res[param.DataIdx],
+				})
+			}
+		}
+		res = append(res, func0.Call(params))
+	}
+	return res
+}
+
+func NewFuncExecOperator(input IOperator, funcs []*FuncNode) *FuncExecOperator {
+	return &FuncExecOperator{InputOperator: NewInputOperator(input), Funcs: funcs}
+}
+
+//=======================ExpandImmOperator=====================
+
+type ExpandImmOperator struct {
+	*InputOperator
+	Columns    []*Column
+	ExpandData []any
+}
+
+func (e *ExpandImmOperator) Open() {
+	e.InputOperator.Open()
+	e.Columns = append(e.Input.GetColumns(), e.Columns...)
+}
+
+func (e *ExpandImmOperator) GetColumns() []*Column {
+	return e.Columns
+}
+
+func (e *ExpandImmOperator) Next() []any {
+	res := e.Input.Next()
+	if res == nil {
+		return nil
+	}
+	return append(res, e.ExpandData...)
+}
+
+func NewExpandImmOperator(input IOperator, columns []*Column, expandData []any) *ExpandImmOperator {
+	return &ExpandImmOperator{InputOperator: NewInputOperator(input), Columns: columns, ExpandData: expandData}
 }
 
 //=====================InsertOperator====================

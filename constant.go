@@ -19,6 +19,7 @@ const (
 const (
 	CatalogTable = "table.catalog" // 其他表信息的元数据表
 	CatalogIndex = "index.catalog" // 其他索引信息的元数据表
+	UndoLog      = "undo.log"      // 采用尾添加的方式，读取时全部读取倒叙恢复
 )
 
 const (
@@ -28,4 +29,11 @@ const (
 	TypStr   = 3 // string 定长的
 	TypTxt   = 4 // string 不定长的
 	TypBool  = 5 // 数据库中没有，条件判断中使用的
+)
+
+const (
+	CmdBegin    = "BEGIN"
+	CmdCommit   = "COMMIT"
+	CmdRollback = "ROLLBACK"
+	CmdExit     = "EXIT"
 )

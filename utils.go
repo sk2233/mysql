@@ -383,3 +383,29 @@ func SubSlice[T comparable](val1 []T, val2 []T) []T {
 	}
 	return res
 }
+
+func GetFuncColumnName(node *FuncNode) string {
+	buff := &strings.Builder{}
+	buff.WriteString(node.FuncName)
+	// 各拿一个特征拼一下，保证其唯一就行了
+	for _, param := range node.Params {
+		if idNode, ok := param.(*IDNode); ok {
+			buff.WriteRune('#')
+			buff.WriteString(idNode.Value)
+		}
+	}
+	return buff.String()
+}
+
+func TokenTypeToType(tokenType string) int8 {
+	switch tokenType {
+	case INT:
+		return TypInt
+	case FLOAT:
+		return TypFloat
+	case STR:
+		return TypStr
+	default:
+		panic(fmt.Sprintf("unknown token type: %s", tokenType))
+	}
+}

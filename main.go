@@ -5,11 +5,18 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
+	"os"
+	"strings"
 )
 
 func main() {
+	//var arr []string
+	//fmt.Println(arr == nil)
+	//arr = make([]string, 0)
+	//fmt.Println(arr == nil)
 	/*
 		select a,b from t1
 		select * from t2 where a > b
@@ -66,6 +73,20 @@ func main() {
 	//TestBig()
 	//TestOperator()
 	TestCombination()
+	//TestDefer()
+}
+
+func TestDefer() {
+	defer fmt.Println("exit ....") // Ctrl + C 并不会执行
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("> welcome")
+	for {
+		fmt.Print("$ ")
+		text, err := reader.ReadString('\n')
+		HandleErr(err)
+		fmt.Println("> query: " + strings.TrimSpace(text))
+		fmt.Printf("(Rows %d)\n", 0)
+	}
 }
 
 func TestCombination() {
@@ -75,13 +96,13 @@ func TestCombination() {
 	defer storage.Close()
 
 	/*  暂时不支持起别名
-	select a,b from t1
-	select * from t2 where a > b AND b > 5
-	select a,b from t3 where a > c order by b
+	select id,height from users
+	select * from users where id > 20 AND id < 30
+	select a,b from t3 where a > c order by b,a desc
 	select distinct a,b from t1
 	select a,b from t1 limit 10 offset 8
-	select a,count(b) from t4 where b > 100 group by a  -- 这里 count 不支持 * 必须使用字段
-	select t1.name,t2.age from t1 join t2 on t1.name = t2.name
+	select a,count(b) from t4 where b > 100 group by a,c  -- 这里 count 不支持 * 必须使用字段
+	select t1.name,t2.age from t1 join t2 on t1.name = t2.name where t1.age > t2.age  -- JOIN 使用字段必须指定表名
 
 	update t2 set n = 22,a = 33 where a > 100 AND b = 100
 	insert into t3 values(2,3,2,4),(1,2,3,4)  -- 必须填写全字段，不支持默认值
@@ -89,17 +110,20 @@ func TestCombination() {
 
 	CREATE TABLE t2(uid int,height float,name varchar(32),extra text)
 	CREATE INDEX idx ON t2(a,b)
+
+	begin commit rollback exit
 	*/
-	scanner := NewScanner("CREATE INDEX idx ON t2(a,b)")
+	// 对于输入内容需要先过指令，不满足任何指令才进行sql解析执行
+	scanner := NewScanner("select * from users where id > 20 AND id < 30")
 	tokens := scanner.ScanTokens()
 	parser := NewParser(tokens)
 	node := parser.ParseTokens()
 	transformer := NewTransformer(node, storage)
 	operator := transformer.Transform()
 
-	fmt.Println(operator.GetColumns())
 	operator.Open()
 	defer operator.Close()
+	fmt.Println(operator.GetColumns())
 	for {
 		res := operator.Next()
 		if res == nil {

@@ -18,11 +18,12 @@ type StarNode struct { // *
 
 type ImmNode struct { // '你好'  2332  22.33 等字面量
 	Value string
+	Type  string
 }
 
 type FuncNode struct {
 	FuncName string
-	Params   []INode // 可以是 IDNode ImmNode  FuncNode  ExprNode
+	Params   []INode // 可以是 IDNode ImmNode
 }
 
 type ExprNode struct { // 只支持一些简单的 二元条件

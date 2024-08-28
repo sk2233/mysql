@@ -180,7 +180,7 @@ func (p *Parser) parseSet() *SetNode {
 	if token.Type == INT || token.Type == FLOAT || token.Type == STR {
 		return &SetNode{
 			Field: &IDNode{Value: field.Value},
-			Value: &ImmNode{Value: token.Value},
+			Value: &ImmNode{Value: token.Value, Type: token.Type},
 		}
 	}
 	if token.Type != ID {
@@ -224,10 +224,11 @@ func (p *Parser) parseSelect() INode {
 	// join
 	if p.Match(JOIN) {
 		table = p.MustRead(ID)
-		p.MustRead(ON) // join 必须有条件
 		res.Join = &JoinNode{
-			Table:     table.Value,
-			Condition: p.parseExpr(),
+			Table: table.Value,
+		}
+		if p.Match(ON) { // 链接条件是可选的
+			res.Join.Condition = p.parseExpr()
 		}
 	}
 	// where
@@ -291,7 +292,7 @@ func (p *Parser) parseField() INode {
 		return &StarNode{}
 	}
 	if token.Type == INT || token.Type == FLOAT || token.Type == STR {
-		return &ImmNode{Value: token.Value}
+		return &ImmNode{Value: token.Value, Type: token.Type}
 	}
 	if token.Type != ID {
 		panic(fmt.Sprintf("parseField err token %v not id", token.Type))
@@ -305,14 +306,11 @@ func (p *Parser) parseField() INode {
 func (p *Parser) parseParam() INode {
 	token := p.Read()
 	if token.Type == INT || token.Type == FLOAT || token.Type == STR {
-		return &ImmNode{Value: token.Value}
+		return &ImmNode{Value: token.Value, Type: token.Type}
 	}
 	if token.Type != ID {
 		panic(fmt.Sprintf("parseParam err token %v not id", token.Type))
-	}
-	if p.Match(LPAREN) { // 支持函数嵌套
-		return p.parseFunc(token)
-	}
+	} // 不支持函数嵌套
 	return &IDNode{Value: token.Value}
 }
 
@@ -359,7 +357,7 @@ func (p *Parser) parseExprItem() INode {
 	}
 	token := p.Read()
 	if token.Type == INT || token.Type == FLOAT || token.Type == STR {
-		return &ImmNode{Value: token.Value}
+		return &ImmNode{Value: token.Value, Type: token.Type}
 	} else if token.Type == ID {
 		if p.Match(LPAREN) {
 			return p.parseFunc(token)

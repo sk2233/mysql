@@ -79,15 +79,159 @@ func (t *Transformer) transformCreateTable(node *CreateTableNode) IOperator {
 }
 
 func (t *Transformer) transformSelect(node *SelectNode) IOperator {
-	// 逻辑转换，语句重写  带有 count() 的非聚合 sql 需要转换为聚合 sql 重写需要对字段做处理
-
-	// 物理算子转换
-
-	// JOIN 先不走索引
-	return nil
+	// 先进行 sql 重写
+	// 1. Fields.FuncNode 若是存在聚合函数且其没有 group 需要添加 group 修改语句为聚合函数
+	hasAggregate := false
+	for _, field := range node.Fields {
+		if func0, ok := field.(*FuncNode); ok {
+			item := GetFunc(func0.FuncName)
+			if item.IsAggregate {
+				hasAggregate = true
+				break
+			}
+		}
+	}
+	if hasAggregate && node.Groups == nil {
+		node.Groups = make([]*IDNode, 0) // 这里注意 nil 与 make([]*IDNode, 0) 是不一样的
+	}
+	// 2. Fields.ImmNode 若是存在全部收集构建扩展表  最后再添加扩展列
+	immColumns := make([]*Column, 0)
+	immData := make([]any, 0)
+	fields := make([]INode, 0)
+	columnIdx := 0
+	for _, field := range node.Fields {
+		if immNode, ok := field.(*ImmNode); ok {
+			typ := TokenTypeToType(immNode.Type)
+			immColumns = append(immColumns, &Column{
+				Name: fmt.Sprintf("Column%d", columnIdx),
+				Type: typ,
+				Len:  8, // 这里都先认为是 8 位 这个数据仅展示不落表
+			})
+			immData = append(immData, ValueToAny(&Value{Value: immNode.Value}, typ))
+			columnIdx++
+		} else {
+			fields = append(fields, field)
+		}
+	}
+	node.Fields = fields
+	// 扩展处理 *
+	hasStar := false
+	fields = make([]INode, 0)
+	for _, field := range node.Fields {
+		if _, ok := field.(*StarNode); ok {
+			hasStar = true
+		} else { // 移除所有 * 节点
+			fields = append(fields, field)
+		}
+	}
+	node.Fields = fields
+	if hasStar { // 添加所有 相关字段 节点
+		table := GetTable(node.From)
+		for _, column := range table.Columns {
+			node.Fields = append(node.Fields, &IDNode{Value: column.Name})
+		}
+		if node.Join != nil {
+			table = GetTable(node.Join.Table)
+			for _, column := range table.Columns {
+				node.Fields = append(node.Fields, &IDNode{Value: column.Name})
+			}
+		}
+	}
+	// 整理节点并移除重复 IDNode 节点
+	if node.Join == nil { // 只有非 join 情况下可以省略表名称
+		t.tidyNodeField(node, node.From)
+	}
+	idNodeSet := make(map[string]struct{})
+	fields = make([]INode, 0)
+	for _, field := range node.Fields {
+		if idNode, ok := field.(*IDNode); ok {
+			if _, has := idNodeSet[idNode.Value]; !has {
+				idNodeSet[idNode.Value] = struct{}{}
+				fields = append(fields, field)
+			}
+		} else { // 这里不是 IDNode 就是 FuncNode
+			fields = append(fields, field)
+		}
+	}
+	node.Fields = fields
+	// 先处理表与 join 再处理 where 条件   只有索引覆盖才走索引
+	fieldNames := t.extraNodeField(node)
+	fieldNames = DistinctSlice(fieldNames) // 先处理 from
+	fromTableFields := t.getTableFields(node.From, fieldNames)
+	fromIndex := t.getMostMatchIndex(node.From, fromTableFields)
+	var input IOperator
+	if fromIndex != nil {
+		input = NewIndexScanOperator(t.Storage, fromIndex.Name)
+	} else {
+		input = NewTableScanOperator(t.Storage, node.From)
+	} // 处理 join
+	if node.Join != nil {
+		joinTableFields := t.getTableFields(node.Join.Table, fieldNames)
+		joinIndex := t.getMostMatchIndex(node.Join.Table, joinTableFields)
+		if joinIndex != nil {
+			input = NewJoinOperator(input, NewIndexScanOperator(t.Storage, joinIndex.Name), node.Join.Condition)
+		} else {
+			input = NewJoinOperator(input, NewTableScanOperator(t.Storage, node.Join.Table), node.Join.Condition)
+		}
+	}
+	// 再处理 group distinct
+	if node.Groups != nil {
+		groupColumns := make([]string, 0)
+		for _, column := range node.Groups {
+			groupColumns = append(groupColumns, column.Value)
+		}
+		funcs0 := make([]*FuncNode, 0)
+		for _, field := range node.Fields {
+			if func0, ok := field.(*FuncNode); ok {
+				funcs0 = append(funcs0, func0)
+			}
+		}
+		input = NewGroupOperator(input, groupColumns, funcs0)
+	}
+	if node.Distinct != nil {
+		distinctFields := make([]string, 0)
+		for _, idNode := range node.Distinct {
+			distinctFields = append(distinctFields, idNode.Value)
+		}
+		input = NewDistinctOperator(input, distinctFields)
+	}
+	// 最后再做 order by   limit
+	if node.Orders != nil {
+		input = NewSortOperator(input, node.Orders)
+	}
+	if node.Limit != nil {
+		input = NewLimitOperator(input, node.Limit.Limit, node.Limit.Offset)
+	}
+	// 处理非聚合函数
+	funcs0 := make([]*FuncNode, 0)
+	for _, field := range node.Fields {
+		if func0, ok := field.(*FuncNode); ok {
+			funcs0 = append(funcs0, func0)
+		}
+	}
+	if len(funcs0) > 0 { // 内部会再次过滤掉聚合函数
+		input = NewFuncExecOperator(input, funcs0)
+	}
+	// 选择字段裁剪 添加扩展列(扩展列没有按原始顺序，会直接排到后面)
+	fieldNames = make([]string, 0)
+	for _, field := range node.Fields {
+		if idNode, ok1 := field.(*IDNode); ok1 {
+			fieldNames = append(fieldNames, idNode.Value)
+		} else if funcNode, ok2 := field.(*FuncNode); ok2 {
+			fieldNames = append(fieldNames, GetFuncColumnName(funcNode))
+		} else {
+			panic(fmt.Sprintf("not support node %v", node))
+		}
+	}
+	input = NewProjectionOperator(input, fieldNames)
+	if len(immColumns) > 0 && len(immData) > 0 {
+		input = NewExpandImmOperator(input, immColumns, immData)
+	}
+	return input
 }
 
 func (t *Transformer) transformUpdate(node *UpdateNode) IOperator {
+	t.tidyNodeField(node, node.Table)
 	// 更新还有原值覆盖写入，必须使用全表扫描
 	input := NewTableScanOperator(t.Storage, node.Table)
 	input = NewFilterOperator(input, node.Where)
@@ -148,18 +292,7 @@ func (t *Transformer) tidyNodeField(node INode, table string) {
 		t.tidyNodeField(target.Field, table)
 		t.tidyNodeField(target.Value, table)
 	case *SelectNode:
-		// 注意 StarNode 的处理 StarNode 需要扩展为全字段
-		fields := make([]INode, 0)
-		for _, field := range target.Fields {
-			if _, ok := field.(*StarNode); ok {
-				meta := GetTable(table)
-				for _, column := range meta.Columns {
-					fields = append(fields, &IDNode{Value: column.Name})
-				}
-			} else {
-				fields = append(fields, field)
-			}
-		} // 正常处理字段
+		// 正常处理字段
 		for _, field := range target.Fields {
 			t.tidyNodeField(field, table)
 		}
@@ -251,6 +384,17 @@ func (t *Transformer) getMostMatchIndex(table string, fields []string) *Index {
 			if res == nil || len(idx.Columns) < len(res.Columns) {
 				res = idx
 			}
+		}
+	}
+	return res
+}
+
+func (t *Transformer) getTableFields(table string, fields []string) []string {
+	res := make([]string, 0)
+	table = table + "."
+	for _, field := range fields {
+		if strings.HasPrefix(field, table) {
+			res = append(res, field)
 		}
 	}
 	return res
