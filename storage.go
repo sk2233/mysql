@@ -417,9 +417,10 @@ func (n *BTreeNode) LoadPreAndNext(file *os.File, parent *BTreeNode) {
 }
 
 type Storage struct {
-	TableFiles  map[string]*os.File // 表名 -> 文件
-	StringFiles map[string]*os.File // 表名 -> 文件
-	IndexTrees  map[string]*BTree   // 索引名称 -> BTree
+	TableFiles         map[string]*os.File // 表名 -> 文件
+	StringFiles        map[string]*os.File // 表名 -> 文件
+	IndexTrees         map[string]*BTree   // 索引名称 -> BTree
+	TransactionManager *TransactionManager
 }
 
 func NewStorage() *Storage {
@@ -524,6 +525,11 @@ func (s *Storage) InsertData(table string, data []any) {
 		btree := s.OpenIndex(index.Name)
 		btree.AddData(data0, offset)
 	}
+	s.TransactionManager.AddUndoRecord(&UndoRecord{
+		Type:   UndoInsert,
+		Table:  table,
+		Offset: offset,
+	})
 }
 
 // 删除一行数据 offset 偏移
@@ -543,6 +549,11 @@ func (s *Storage) DeleteData(table string, offset int64) {
 	HandleErr(err)
 	_, err = file.Write([]byte{RecordIsDelete})
 	HandleErr(err)
+	s.TransactionManager.AddUndoRecord(&UndoRecord{
+		Type:  UndoDelete,
+		Table: table,
+		Data:  data,
+	})
 }
 
 // 修改一行数据 offset 偏移 data 全字段，覆盖更新，主要方便索引更新

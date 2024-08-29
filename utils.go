@@ -409,3 +409,51 @@ func TokenTypeToType(tokenType string) int8 {
 		panic(fmt.Sprintf("unknown token type: %s", tokenType))
 	}
 }
+
+func PrintTable(operator IOperator) {
+	data := make([][]string, 0)
+	ls := make([]int, len(operator.GetColumns()))
+	row := make([]string, 0)
+	for i, column := range operator.GetColumns() {
+		row = append(row, column.Name)
+		ls[i] = max(ls[i], len(column.Name))
+	}
+	data = append(data, row)
+	for {
+		res := operator.Next()
+		if res == nil {
+			break
+		}
+		row = make([]string, 0)
+		for i, item := range res {
+			itemStr := fmt.Sprintf("%v", item)
+			row = append(row, itemStr)
+			ls[i] = max(ls[i], len(itemStr))
+		}
+		data = append(data, row)
+	}
+	buff := &strings.Builder{}
+	buff.WriteRune('+')
+	for _, l := range ls {
+		for i := 0; i < l+2; i++ {
+			buff.WriteRune('-')
+		}
+		buff.WriteRune('+')
+	}
+	item := buff.String()
+	buff = &strings.Builder{}
+	buff.WriteString(item)
+	for _, row = range data {
+		buff.WriteString("\n| ")
+		for i, temp := range row {
+			buff.WriteString(temp)
+			for j := 0; j < ls[i]-len(temp); j++ {
+				buff.WriteRune(' ')
+			}
+			buff.WriteString(" | ")
+		}
+		buff.WriteString("\n")
+		buff.WriteString(item)
+	}
+	fmt.Println(buff.String())
+}

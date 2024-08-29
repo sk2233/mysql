@@ -70,7 +70,7 @@ func (t *Transformer) transformCreateTable(node *CreateTableNode) IOperator {
 			panic(fmt.Sprintf("invalid column %v len %d", column, l))
 		}
 		columns = append(columns, &Column{
-			Name: fmt.Sprintf("%s.%s", node.Table, column.Name),
+			Name: fmt.Sprintf("%s.%s", node.Table, column.Name.Value),
 			Type: typ,
 			Len:  l,
 		})
@@ -173,6 +173,9 @@ func (t *Transformer) transformSelect(node *SelectNode) IOperator {
 		} else {
 			input = NewJoinOperator(input, NewTableScanOperator(t.Storage, node.Join.Table), node.Join.Condition)
 		}
+	}
+	if node.Where != nil {
+		input = NewFilterOperator(input, node.Where)
 	}
 	// 再处理 group distinct
 	if node.Groups != nil {

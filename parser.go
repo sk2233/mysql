@@ -340,7 +340,7 @@ func (p *Parser) parseSubExpr() INode {
 			left = &ExprNode{
 				Left:     left,
 				Right:    p.parseExprItem(),
-				Operator: token.Value,
+				Operator: token.Type,
 			}
 		} else {
 			p.UnRead()

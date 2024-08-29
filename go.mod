@@ -1,3 +1,3 @@
 module my_sql
 
-go 1.18
+go 1.21

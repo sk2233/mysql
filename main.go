@@ -72,8 +72,69 @@ func main() {
 	//TestStorage()
 	//TestBig()
 	//TestOperator()
-	TestCombination()
+	//TestCombination()
 	//TestDefer()
+	TestCmd()
+}
+
+func TestCmd() {
+	/*  暂时不支持起别名
+	select id,height from users
+	select * from users where id > 20 AND id < 30
+	select id,name from users where id > 20 order by id desc
+	select distinct id,name from users
+	select id,name from users limit 10 offset 8
+	select name,count(id) from users where id > 30 group by name  -- 这里 count 不支持 * 必须使用字段
+	select users.id,users.name,stud.uid,stud.height from users join stud on users.id = stud.uid where stud.uid < 100  -- JOIN 使用字段必须指定表名
+
+	update stud set name = 'mysql',extra = 'a db' where uid > 100
+	insert into stud values(1,22,'hello','world'),(2,33,'my','sql')  -- 必须填写全字段，不支持默认值
+	delete from stud where id = 1
+
+	CREATE TABLE stud(uid int,height float,name varchar(32),extra text)
+	CREATE INDEX stud_idx ON stud(height,name)
+
+	begin commit rollback exit
+	*/
+	LoadCatalog()
+	defer SaveCatalog()
+	storage := NewStorage()
+	defer storage.Close()
+	txManager := NewTransactionManager(storage)
+	storage.TransactionManager = txManager
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("> welcome")
+	for {
+		fmt.Print("$ ")
+		text, err := reader.ReadString('\n')
+		HandleErr(err)
+		text = strings.TrimSpace(text)
+		fmt.Println("> query: " + text)
+
+		switch strings.ToUpper(text) { // 对于输入内容需要先过指令，不满足任何指令才进行sql解析执行
+		case CmdBegin:
+			txManager.Begin()
+		case CmdCommit:
+			txManager.Commit()
+		case CmdRollback:
+			txManager.Rollback()
+		case CmdExit:
+			fmt.Println("bye")
+			return
+		default:
+			scanner := NewScanner(text)
+			tokens := scanner.ScanTokens()
+			parser := NewParser(tokens)
+			node := parser.ParseTokens()
+			transformer := NewTransformer(node, storage)
+			operator := transformer.Transform()
+
+			operator.Open()
+			PrintTable(operator)
+			operator.Close()
+		}
+	}
 }
 
 func TestDefer() {
@@ -94,27 +155,29 @@ func TestCombination() {
 	defer SaveCatalog()
 	storage := NewStorage()
 	defer storage.Close()
+	txManager := NewTransactionManager(storage)
+	storage.TransactionManager = txManager
 
 	/*  暂时不支持起别名
 	select id,height from users
 	select * from users where id > 20 AND id < 30
-	select a,b from t3 where a > c order by b,a desc
-	select distinct a,b from t1
-	select a,b from t1 limit 10 offset 8
-	select a,count(b) from t4 where b > 100 group by a,c  -- 这里 count 不支持 * 必须使用字段
-	select t1.name,t2.age from t1 join t2 on t1.name = t2.name where t1.age > t2.age  -- JOIN 使用字段必须指定表名
+	select id,name from users where id > 20 order by id desc
+	select distinct id,name from users
+	select id,name from users limit 10 offset 8
+	select name,count(id) from users where id > 30 group by name  -- 这里 count 不支持 * 必须使用字段
+	select users.id,users.name,stud.uid,stud.height from users join stud on users.id = stud.uid where stud.uid < 100  -- JOIN 使用字段必须指定表名
 
-	update t2 set n = 22,a = 33 where a > 100 AND b = 100
-	insert into t3 values(2,3,2,4),(1,2,3,4)  -- 必须填写全字段，不支持默认值
-	delete from t3 where a = 100
+	update stud set name = 'mysql',extra = 'a db' where uid > 100
+	insert into stud values(1,22,'hello','world'),(2,33,'my','sql')  -- 必须填写全字段，不支持默认值
+	delete from stud where id = 1
 
-	CREATE TABLE t2(uid int,height float,name varchar(32),extra text)
-	CREATE INDEX idx ON t2(a,b)
+	CREATE TABLE stud(uid int,height float,name varchar(32),extra text)
+	CREATE INDEX stud_idx ON stud(height,name)
 
 	begin commit rollback exit
 	*/
 	// 对于输入内容需要先过指令，不满足任何指令才进行sql解析执行
-	scanner := NewScanner("select * from users where id > 20 AND id < 30")
+	scanner := NewScanner("select users.id,users.name,stud.uid,stud.height from users join stud on users.id = stud.uid where stud.uid < 100")
 	tokens := scanner.ScanTokens()
 	parser := NewParser(tokens)
 	node := parser.ParseTokens()
@@ -123,14 +186,7 @@ func TestCombination() {
 
 	operator.Open()
 	defer operator.Close()
-	fmt.Println(operator.GetColumns())
-	for {
-		res := operator.Next()
-		if res == nil {
-			break
-		}
-		fmt.Println(res)
-	}
+	PrintTable(operator)
 }
 
 func TestOperator() {
