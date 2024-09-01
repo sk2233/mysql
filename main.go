@@ -80,6 +80,7 @@ func main() {
 func TestCmd() {
 	/*  暂时不支持起别名
 	select id,height from users
+	select id,height,test(test(id)) from users limit 2
 	select * from users where id > 20 AND id < 30
 	select id,name from users where id > 20 order by id desc
 	select distinct id,name from users

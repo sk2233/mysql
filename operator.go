@@ -612,16 +612,10 @@ func NewLimitOperator(input IOperator, limit int, offset int) IOperator {
 
 //======================FuncExecOperator===========================
 
-type Param struct {
-	DataIdx int    // 动态列参数
-	Value   *Value // Imm 参数
-}
-
 type FuncExecOperator struct {
 	*InputOperator
 	Funcs   []*FuncNode // 这里只处理普通函数不处理聚合函数
 	Columns []*Column
-	Params  [][]*Param // 每个函数对应的参数
 }
 
 func (f *FuncExecOperator) GetColumns() []*Column {
@@ -630,13 +624,7 @@ func (f *FuncExecOperator) GetColumns() []*Column {
 
 func (f *FuncExecOperator) Open() {
 	f.Input.Open()
-	columns := f.Input.GetColumns()
-	idxMap := make(map[string]int)
-	columnMap := make(map[string]*Column)
-	for idx, column := range columns {
-		idxMap[column.Name] = idx
-		columnMap[column.Name] = column
-	}
+	columns := CloneSlice(f.Input.GetColumns())
 	funcNodes := make([]*FuncNode, 0)
 	for _, funcNode := range f.Funcs {
 		func0 := GetFunc(funcNode.FuncName)
@@ -644,34 +632,12 @@ func (f *FuncExecOperator) Open() {
 			continue
 		}
 		funcNodes = append(funcNodes, funcNode)
-		params := make([]*Param, 0)
-		typs := make([]int8, 0)
-		for _, param := range funcNode.Params {
-			if idNode, ok1 := param.(*IDNode); ok1 {
-				params = append(params, &Param{
-					DataIdx: idxMap[idNode.Value],
-				})
-				typs = append(typs, columnMap[idNode.Value].Type)
-			} else if immNode, ok2 := param.(*ImmNode); ok2 {
-				typ := TokenTypeToType(immNode.Type)
-				params = append(params, &Param{
-					Value: &Value{
-						Type:  typ,
-						Value: immNode.Value,
-					},
-				})
-				typs = append(typs, typ)
-			} else {
-				panic(fmt.Sprintf("invalid param = %v", param))
-			}
-		}
-		typ, l := func0.RetType(typs...)
+		typ, l := func0.RetType()
 		columns = append(columns, &Column{
 			Name: GetFuncColumnName(funcNode),
 			Type: typ,
 			Len:  l,
 		})
-		f.Params = append(f.Params, params)
 	}
 	f.Funcs = funcNodes
 	f.Columns = columns
@@ -682,20 +648,9 @@ func (f *FuncExecOperator) Next() []any {
 	if res == nil {
 		return nil
 	}
-	for i, funcNode := range f.Funcs {
-		func0 := GetFunc(funcNode.FuncName)
-		params := make([]*Value, 0)
-		for _, param := range f.Params[i] {
-			if param.Value != nil {
-				params = append(params, param.Value)
-			} else {
-				params = append(params, &Value{
-					Type: f.Columns[param.DataIdx].Type, // 会增加列可以直接使用列
-					Data: res[param.DataIdx],
-				})
-			}
-		}
-		res = append(res, func0.Call(params))
+	for _, funcNode := range f.Funcs {
+		val := ParseValue(funcNode, f.Input.GetColumns(), res)
+		res = append(res, ValueToAny(val, val.Type))
 	}
 	return res
 }

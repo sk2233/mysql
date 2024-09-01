@@ -23,7 +23,7 @@ type ImmNode struct { // '你好'  2332  22.33 等字面量
 
 type FuncNode struct {
 	FuncName string
-	Params   []INode // 可以是 IDNode ImmNode
+	Params   []INode // 可以是 IDNode ImmNode FuncNode 聚合函数只支持 IDNode
 }
 
 type ExprNode struct { // 只支持一些简单的 二元条件

@@ -39,8 +39,8 @@ type Index struct {
 type Func struct { // 函数定义
 	Name             string
 	IsAggregate      bool                               // 是否为聚合函数
-	RetType          func(typs ...int8) (int8, int64)   // 非聚合函数，类型需要与params对齐
-	AggregateRetType func(column *Column) (int8, int64) // 对于聚合函数只有一列输入
+	RetType          func() (int8, int64)               // 非聚合函数，返回值类型与长度是固定的
+	AggregateRetType func(column *Column) (int8, int64) // 聚合函数需要根据对应列决定返回类型与长度
 	Call             func(params []*Value) any          // 计算最终值
 }
 
@@ -70,6 +70,15 @@ var (
 		},
 		Call: func(params []*Value) any {
 			return int64(len(params))
+		},
+	}, {
+		Name:        "TEST",
+		IsAggregate: false,
+		RetType: func() (int8, int64) {
+			return TypInt, 8
+		},
+		Call: func(params []*Value) any {
+			return params[0].ToInt() * 2
 		},
 	}}
 )

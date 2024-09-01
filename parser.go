@@ -310,7 +310,10 @@ func (p *Parser) parseParam() INode {
 	}
 	if token.Type != ID {
 		panic(fmt.Sprintf("parseParam err token %v not id", token.Type))
-	} // 不支持函数嵌套
+	}
+	if p.Match(LPAREN) {
+		return p.parseFunc(token)
+	}
 	return &IDNode{Value: token.Value}
 }
 
