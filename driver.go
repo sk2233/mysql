@@ -248,8 +248,7 @@ func (d *Driver) HandleLogin(conn net.Conn) {
 	WriteU8(buff, d.Lang)
 	WriteBytes(buff, make([]byte, 23))
 	WriteCStr(buff, d.User)
-	WriteU8(buff, uint8(len(passwd)))
-	WriteBytes(buff, passwd)
+	WriteNStr(buff, string(passwd))
 	WriteCStr(buff, d.DB)
 	WriteCStr(buff, AuthPlugin)
 	d.Num++ // 按要求写回包并做好 Num 自增
@@ -259,6 +258,11 @@ func (d *Driver) HandleLogin(conn net.Conn) {
 		Data: buff.Bytes(),
 	}
 	WritePackage(conn, pkg)
+}
+
+func WriteNStr(writer io.Writer, val string) {
+	WriteU8(writer, uint8(len(val)))
+	WriteBytes(writer, []byte(val))
 }
 
 func (d *Driver) HandleLoginResp(conn net.Conn) {
