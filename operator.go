@@ -339,7 +339,7 @@ func NewDistinctOperator(input IOperator, distinctFields []string) IOperator {
 
 type FilterOperator struct {
 	*InputOperator
-	Expr *ExprNode // 判断条件
+	Expr *ExprNode // 判断条件 也可以细分查询条件，每个查询条件都一个 Filter 这样方便索引范围查找，不过多次扫描再合并就看值不值了
 }
 
 func (f *FilterOperator) Next() []any {
